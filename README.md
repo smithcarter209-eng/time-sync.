@@ -1,3 +1,2 @@
 # time-sync.
-deploy
-now!
+la
