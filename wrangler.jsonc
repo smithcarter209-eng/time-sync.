@@ -1,7 +1,6 @@
 {
-  // IMPORTANT: change "timesync" to the exact name of your Cloudflare project
-  "name": "timesync",
-  "main": "src/worker.js",
+  "name": "YOUR-PROJECT-NAME",
+  "main": "worker.js",
   "compatibility_date": "2025-01-01",
   "assets": {
     "directory": "./public",
