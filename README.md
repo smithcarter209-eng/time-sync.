@@ -1,2 +1,3 @@
 # time-sync.
 deploy
+now
