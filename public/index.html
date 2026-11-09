@@ -145,9 +145,16 @@
 
           <!-- Employee Name (required to clock in) -->
           <div class="mb-4">
-            <label for="employee-name-input" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Your Name <span class="text-rose-500">*</span></label>
-            <input type="text" id="employee-name-input" maxlength="60" autocomplete="name" placeholder="Enter your full name to clock in" oninput="clearNameError()" onkeydown="if(event.key==='Enter' && !isClockedIn){toggleClockState();}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-500">
+            <label for="employee-name-input" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Your Name <span class="text-slate-400 normal-case font-normal">(filled in from your code)</span></label>
+            <input type="text" id="employee-name-input" maxlength="60" autocomplete="name" placeholder="Appears when you enter your code" readonly oninput="clearNameError()" onkeydown="if(event.key==='Enter' && !isClockedIn){toggleClockState();}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-500">
             <p id="employee-name-error" class="hidden text-xs text-rose-600 font-medium mt-1.5">Please enter your name before clocking in.</p>
+          </div>
+
+          <!-- Personal code (required to clock in) -->
+          <div class="mb-4">
+            <label for="employee-code-input" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Your Code <span class="text-rose-500">*</span></label>
+            <input type="password" id="employee-code-input" maxlength="12" autocomplete="off" placeholder="Enter your personal code" oninput="clearNameError(); previewEmployeeName()" onkeydown="if(event.key==='Enter' && !isClockedIn){toggleClockState();}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-500">
+            <p id="employee-code-error" class="hidden text-xs text-rose-600 font-medium mt-1.5">Please enter your code before clocking in.</p>
           </div>
 
           <!-- Action Button (Clock In / Clock Out) -->
@@ -188,13 +195,10 @@
             </div>
           </div>
 
-          <!-- Weekly Overview Small Stat (Clickable to open detailed modal) -->
-          <div onclick="openCurrentEmployeeHours()" title="Click to view weekly hours details" class="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-sm cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition">
-            <span class="text-slate-500 font-medium">Weekly Target (40h):</span>
-            <span class="font-bold text-slate-800 flex items-center space-x-1">
-              <span><span id="weekly-accumulated-hours">0.0</span> / 40 hrs</span>
-              <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400"></i>
-            </span>
+          <!-- Weekly Overview Small Stat -->
+          <div class="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-sm">
+            <span class="text-slate-500">Weekly Target (40h):</span>
+            <span class="font-bold text-slate-800"><span id="weekly-accumulated-hours">0.0</span> / 40 hrs</span>
           </div>
         </div>
 
@@ -288,7 +292,7 @@
         <div class="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
           <div>
             <h2 class="text-lg font-bold text-slate-900">Live Team Geolocation Monitor</h2>
-            <p class="text-xs text-slate-500 mt-0.5">Real-time status, timestamps, and locations of your entire team (Click employee card to view weekly breakdown)</p>
+            <p class="text-xs text-slate-500 mt-0.5">Real-time status, timestamps, and locations of your entire team</p>
           </div>
           
           <!-- Search & Filter Controls -->
@@ -310,7 +314,7 @@
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="p-6 border-b border-slate-100">
           <h3 class="text-lg font-bold text-slate-900">All Company Clock Entries</h3>
-          <p class="text-xs text-slate-500 mt-0.5">Comprehensive chronological audit trail of all clock-in/out events with location coordinates (Click employee name to view weekly breakdown)</p>
+          <p class="text-xs text-slate-500 mt-0.5">Comprehensive chronological audit trail of all clock-in/out events with location coordinates</p>
         </div>
 
         <div class="overflow-x-auto">
@@ -427,6 +431,28 @@
 
   <!-- APPLICATION JAVASCRIPT -->
   <script>
+    // ============================================================
+    // EMPLOYEE CODES  <<< EDIT THIS LIST >>>
+    // One line per person:  'their-code': 'Their Full Name',
+    // Codes are not case-sensitive. Only codes listed here can clock in.
+    // Example (remove the // to use):
+    //   '1111': 'Alex Rivera',
+    //   '2222': 'Bea Chen',
+    // ============================================================
+    const EMPLOYEE_CODES = {
+      // '1111': 'Alex Rivera',
+      // '2222': 'Bea Chen',
+    };
+
+    function lookupEmployeeName(code) {
+      const wanted = String(code || '').trim().toLowerCase();
+      if (!wanted) return '';
+      for (const k of Object.keys(EMPLOYEE_CODES)) {
+        if (k.trim().toLowerCase() === wanted) return EMPLOYEE_CODES[k];
+      }
+      return '';
+    }
+
     // GLOBAL STATE MANAGEMENT
     const SHIFT_TARGET_SECONDS = 10 * 3600; // 10 hours in seconds
     let currentShiftSeconds = 0;
@@ -434,6 +460,10 @@
     let isClockedIn = false;
     let clockInTimestamp = null;
     let currentUserName = '';
+    let currentUserCode = '';
+    let employeeRegistry = {};   // code -> name, remembered on this device
+    let shiftOwnerKey = '';
+    let shiftDate = '';
     const BREAK_ALLOWANCE_SECONDS = 45 * 60; // 45 minute break allowance
     let isOnBreak = false;
     let breakSecondsUsed = 0;
@@ -448,13 +478,43 @@
       return escapeHtml(JSON.stringify(String(str ?? '')));
     }
 
+    // Each person is identified by their code (older entries without a code are matched by name)
+    function personKey(log) {
+      return log.employeeCode ? 'c:' + log.employeeCode : 'n:' + (log.employeeName || LEGACY_SELF_NAME);
+    }
+
+    function currentKey() {
+      return currentUserCode ? 'c:' + currentUserCode : 'n:' + (currentUserName || LEGACY_SELF_NAME);
+    }
+
+    // Logs that belong to the person currently using this device
     function isMyLog(log) {
-      return log.isMine === true || log.employeeName === LEGACY_SELF_NAME;
+      if (currentUserCode) {
+        return log.employeeCode ? log.employeeCode === currentUserCode : log.employeeName === currentUserName;
+      }
+      return !log.employeeCode;
+    }
+
+    function previewEmployeeName() {
+      if (isClockedIn) return;
+      document.getElementById('employee-name-input').value = lookupEmployeeName(document.getElementById('employee-code-input').value);
+    }
+
+    function showFieldError(which, message) {
+      const input = document.getElementById(which === 'code' ? 'employee-code-input' : 'employee-name-input');
+      const err = document.getElementById(which === 'code' ? 'employee-code-error' : 'employee-name-error');
+      err.innerText = message;
+      err.classList.remove('hidden');
+      input.classList.add('border-rose-400', 'ring-2', 'ring-rose-200');
+      input.focus();
+      showToast(message, 'info');
     }
 
     function clearNameError() {
       document.getElementById('employee-name-error').classList.add('hidden');
       document.getElementById('employee-name-input').classList.remove('border-rose-400', 'ring-2', 'ring-rose-200');
+      document.getElementById('employee-code-error').classList.add('hidden');
+      document.getElementById('employee-code-input').classList.remove('border-rose-400', 'ring-2', 'ring-rose-200');
     }
 
     // Update status badge + clock button for the current clocked-in state
@@ -496,6 +556,7 @@
         id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
         employeeName: currentUserName || LEGACY_SELF_NAME,
         isMine: true,
+          employeeCode: currentUserCode,
         action: action,
         time: now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -551,7 +612,7 @@
     }
 
     // Seconds worked per day this week (index 0 = first day of the week). Breaks are excluded.
-    function computeWeekHours(name) {
+    function computeWeekHours(key) {
       const { start, end } = getWeekRange();
       const days = [0, 0, 0, 0, 0, 0, 0];
 
@@ -570,7 +631,7 @@
       }
 
       const events = activityLogs
-        .filter(l => l.employeeName === name)
+        .filter(l => personKey(l) === key)
         .map(l => ({ action: l.action, ts: logTimestamp(l) }))
         .filter(e => e.ts !== null)
         .sort((x, y) => x.ts - y.ts);
@@ -585,7 +646,7 @@
       });
 
       // Still working right now (this device's current user only)
-      if (segStart !== null && isClockedIn && !isOnBreak && name === (currentUserName || LEGACY_SELF_NAME)) {
+      if (segStart !== null && isClockedIn && !isOnBreak && key === currentKey()) {
         addSegment(segStart, Date.now());
       }
       return days;
@@ -597,9 +658,9 @@
       return h + 'h ' + String(m).padStart(2, '0') + 'm';
     }
 
-    function openEmployeeHours(name) {
+    function openEmployeeHours(key, name) {
       const { start, end } = getWeekRange();
-      const days = computeWeekHours(name);
+      const days = computeWeekHours(key);
       const total = days.reduce((a, b) => a + b, 0);
       const pct = Math.min(100, (total / 3600 / WEEKLY_TARGET_HOURS) * 100);
       const lastDay = new Date(end); lastDay.setDate(lastDay.getDate() - 1);
@@ -630,34 +691,32 @@
       lucide.createIcons();
     }
 
-    function openCurrentEmployeeHours() {
-      const name = currentUserName || LEGACY_SELF_NAME;
-      openEmployeeHours(name);
-    }
-
     function closeEmployeeHours() {
       document.getElementById('employee-hours-modal').classList.add('hidden');
     }
 
-    // Build staff entries from everyone who appears in the logs (other than the current user)
-    function deriveEmployeesFromLogs(excludeName) {
+    // Build staff entries from everyone who appears in the logs (other than the current person)
+    function deriveEmployeesFromLogs(excludeKey) {
       const latest = {};
-      activityLogs.forEach(l => {          // newest first, so first hit per name is the latest event
-        if (l.employeeName && l.employeeName !== excludeName && !latest[l.employeeName]) latest[l.employeeName] = l;
+      activityLogs.forEach(l => {          // newest first, so first hit per person is the latest event
+        const k = personKey(l);
+        if (k !== excludeKey && !latest[k]) latest[k] = l;
       });
-      const todayIdx = Math.round((new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) - getWeekRange().start) / 86400000);
-      return Object.keys(latest).map(name => {
-        const l = latest[name];
-        const lastIn = activityLogs.find(x => x.employeeName === name && x.action === 'Clock In');
+      const now = new Date();
+      const todayIdx = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - getWeekRange().start) / 86400000);
+      return Object.keys(latest).map(k => {
+        const l = latest[k];
+        const lastIn = activityLogs.find(x => personKey(x) === k && x.action === 'Clock In');
         const coords = String(l.coords || '').split(',');
         return {
-          id: 'emp-' + name,
-          name: name,
+          id: 'emp-' + k,
+          key: k,
+          name: l.employeeName || LEGACY_SELF_NAME,
           role: 'Employee',
           isClockedIn: l.action !== 'Clock Out',
           isOnBreak: l.action === 'Break Start',
           clockInTime: lastIn ? lastIn.time : 'Not Active',
-          elapsedSeconds: computeWeekHours(name)[todayIdx] || 0,
+          elapsedSeconds: computeWeekHours(k)[todayIdx] || 0,
           location: { address: l.address || 'Captured GPS Site', lat: (coords[0] || '').trim(), lng: (coords[1] || '').trim(), type: 'GPS Verified' }
         };
       });
@@ -665,8 +724,11 @@
 
     function syncNameInput() {
       const input = document.getElementById('employee-name-input');
-      input.value = currentUserName;
+      const codeInput = document.getElementById('employee-code-input');
+      input.value = isClockedIn ? currentUserName : '';
+      codeInput.value = isClockedIn ? currentUserCode : '';
       input.disabled = isClockedIn;
+      codeInput.disabled = isClockedIn;
     }
     let userLocation = { lat: null, lng: null, address: "Fetching location..." };
 
@@ -772,15 +834,26 @@
 
       if (!isClockedIn) {
         // --- CLOCK IN ACTION ---
-        const nameInput = document.getElementById('employee-name-input');
-        const enteredName = nameInput.value.trim().replace(/\s+/g, ' ');
-        if (!enteredName) {
-          document.getElementById('employee-name-error').classList.remove('hidden');
-          nameInput.classList.add('border-rose-400', 'ring-2', 'ring-rose-200');
-          nameInput.focus();
-          showToast("Please enter your name to clock in.", "info");
+        const code = document.getElementById('employee-code-input').value.trim().toLowerCase();
+        if (!code) {
+          showFieldError('code', 'Please enter your code to clock in.');
           return;
         }
+        const enteredName = lookupEmployeeName(code);
+        if (!enteredName) {
+          showFieldError('code', 'Code not recognized. Check with your manager.');
+          return;
+        }
+
+        // Start a fresh timer when a different person (or a new day) clocks in
+        const ownerKey = 'c:' + code;
+        if (shiftOwnerKey !== ownerKey || shiftDate !== now.toDateString()) {
+          currentShiftSeconds = 0;
+          breakSecondsUsed = 0;
+        }
+        shiftOwnerKey = ownerKey;
+        shiftDate = now.toDateString();
+        currentUserCode = code;
         currentUserName = enteredName;
         isClockedIn = true;
         clockInTimestamp = now;
@@ -796,6 +869,7 @@
           id: 'log-' + Date.now(),
           employeeName: currentUserName,
           isMine: true,
+          employeeCode: currentUserCode,
           action: 'Clock In',
           time: timeFormatted,
           date: dateFormatted,
@@ -825,6 +899,7 @@
           id: 'log-' + Date.now(),
           employeeName: currentUserName || LEGACY_SELF_NAME,
           isMine: true,
+          employeeCode: currentUserCode,
           action: 'Clock Out',
           time: timeFormatted,
           date: dateFormatted,
@@ -876,7 +951,7 @@
         String(secs).padStart(2, '0');
 
       document.getElementById('shift-timer').innerText = formattedElapsed;
-      document.getElementById('weekly-accumulated-hours').innerText = (computeWeekHours(currentUserName || LEGACY_SELF_NAME).reduce((a, b) => a + b, 0) / 3600).toFixed(1);
+      document.getElementById('weekly-accumulated-hours').innerText = (computeWeekHours(currentKey()).reduce((a, b) => a + b, 0) / 3600).toFixed(1);
 
       // Format Remaining Time against 10h target allowance
       let remainingSecs = SHIFT_TARGET_SECONDS - currentShiftSeconds;
@@ -964,6 +1039,7 @@
       // Update dynamic user state in manager's copy
       const currentUserInManager = {
         id: "emp-you",
+        key: currentKey(),
         name: currentUserName || LEGACY_SELF_NAME,
         role: "Employee",
         avatar: "",
@@ -980,8 +1056,7 @@
       };
 
       const hasActivity = isClockedIn || !!currentUserName || activityLogs.length > 0;
-      const currentName = currentUserName || LEGACY_SELF_NAME;
-      const allEmployees = hasActivity ? [currentUserInManager, ...deriveEmployeesFromLogs(currentName), ...employeesData] : [...employeesData];
+      const allEmployees = hasActivity ? [currentUserInManager, ...deriveEmployeesFromLogs(currentKey()), ...employeesData] : [...employeesData];
 
       // Update stat count
       const activeCount = allEmployees.filter(e => e.isClockedIn).length;
@@ -1002,22 +1077,20 @@
       allEmployees.forEach(emp => {
         const hrs = Math.floor(emp.elapsedSeconds / 3600);
         const mins = Math.floor((emp.elapsedSeconds % 3600) / 60);
-        const weekTotalSecs = computeWeekHours(emp.name).reduce((a, b) => a + b, 0);
+        const empKey = emp.key || ('n:' + emp.name);
+        const weekTotalSecs = computeWeekHours(empKey).reduce((a, b) => a + b, 0);
 
         const card = document.createElement('div');
-        card.className = "bg-white p-5 rounded-xl border border-slate-200 hover:border-indigo-300 shadow-sm space-y-4 transition flex flex-col justify-between cursor-pointer group";
+        card.className = "bg-white p-5 rounded-xl border border-slate-200 hover:border-indigo-300 shadow-sm space-y-4 transition flex flex-col justify-between cursor-pointer";
         card.title = "Click to see this week's hours";
-        card.onclick = () => openEmployeeHours(emp.name);
+        card.onclick = () => openEmployeeHours(empKey, emp.name);
         card.innerHTML = `
           <div>
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 font-bold text-sm flex items-center justify-center border border-slate-200 group-hover:bg-indigo-600 group-hover:text-white transition">${escapeHtml((emp.name || "?").trim().charAt(0).toUpperCase())}</div>
+                <div class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 font-bold text-sm flex items-center justify-center border border-slate-200">${escapeHtml((emp.name || "?").trim().charAt(0).toUpperCase())}</div>
                 <div>
-                  <h4 class="font-bold text-slate-900 text-sm group-hover:text-indigo-600 transition flex items-center space-x-1">
-                    <span>${escapeHtml(emp.name)}</span>
-                    <i data-lucide="bar-chart-2" class="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition"></i>
-                  </h4>
+                  <h4 class="font-bold text-slate-900 text-sm">${escapeHtml(emp.name)}</h4>
                   <p class="text-xs text-slate-500">${emp.role}</p>
                 </div>
               </div>
@@ -1035,14 +1108,11 @@
                 <span class="text-slate-400">Duration Today:</span>
                 <span class="font-bold text-indigo-600 font-mono">${hrs}h ${mins}m</span>
               </div>
-              <div class="flex justify-between text-xs bg-indigo-50/50 p-1.5 rounded-lg border border-indigo-100/50">
-                <span class="text-indigo-700 font-medium">This Week Total:</span>
-                <span class="font-extrabold text-indigo-900 font-mono">${formatHM(weekTotalSecs)}</span>
+              <div class="flex justify-between text-xs">
+                <span class="text-slate-400">This Week:</span>
+                <span class="font-bold text-slate-800 font-mono">${formatHM(weekTotalSecs)}</span>
               </div>
-              <div class="text-[11px] text-indigo-500 font-medium flex items-center justify-end space-x-1">
-                <span>Click for daily break-down</span>
-                <i data-lucide="arrow-right" class="w-3 h-3"></i>
-              </div>
+              <div class="text-[11px] text-indigo-500 font-medium">Click card for daily breakdown</div>
             </div>
 
             <div class="mt-3 p-2.5 bg-slate-50 rounded-lg border border-slate-100">
@@ -1070,12 +1140,7 @@
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50/80 transition";
         tr.innerHTML = `
-          <td class="py-3.5 px-6 font-semibold text-slate-900">
-            <button onclick="openEmployeeHours(${jsAttr(log.employeeName)})" class="text-indigo-600 hover:text-indigo-800 hover:underline font-semibold text-left flex items-center space-x-1">
-              <span>${escapeHtml(log.employeeName)}</span>
-              <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400"></i>
-            </button>
-          </td>
+          <td class="py-3.5 px-6 font-semibold text-slate-900">${escapeHtml(log.employeeName)}</td>
           <td class="py-3.5 px-6">
             <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${actionPillClass(log.action)}">
               ${log.action}
@@ -1252,6 +1317,10 @@
         isClockedIn,
         isOnBreak,
         breakSecondsUsed,
+        currentUserCode,
+        employeeRegistry,
+        shiftOwnerKey,
+        shiftDate,
         currentUserName,
         currentShiftSeconds,
         activityLogs
@@ -1267,6 +1336,10 @@
           isClockedIn = parsed.isClockedIn || false;
           isOnBreak = isClockedIn && parsed.isOnBreak === true;
           breakSecondsUsed = parsed.breakSecondsUsed || 0;
+          currentUserCode = typeof parsed.currentUserCode === 'string' ? parsed.currentUserCode : '';
+          employeeRegistry = (parsed.employeeRegistry && typeof parsed.employeeRegistry === 'object') ? parsed.employeeRegistry : {};
+          shiftOwnerKey = parsed.shiftOwnerKey || '';
+          shiftDate = parsed.shiftDate || '';
           currentShiftSeconds = parsed.currentShiftSeconds || 0;
           currentUserName = typeof parsed.currentUserName === 'string' ? parsed.currentUserName : '';
           if (parsed.activityLogs && parsed.activityLogs.length > 0) {
