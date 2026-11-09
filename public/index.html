@@ -105,7 +105,7 @@
             <div class="my-6 text-center sm:text-left py-4 px-6 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Current Time</div>
-                <div id="current-live-time" class="text-3xl font-extrabold text-slate-800 font-mono">10:00:00 AM</div>
+                <div id="current-live-time" class="text-3xl font-extrabold text-slate-800 font-mono">00:00:00 AM</div>
                 <div id="current-live-date" class="text-xs text-slate-500 font-medium">Loading date...</div>
               </div>
 
@@ -117,7 +117,7 @@
                 </div>
                 <div class="text-center">
                   <div class="text-xs text-slate-400 font-medium">Break Left</div>
-                  <div class="text-lg font-bold text-slate-700">45m</div>
+                  <div id="break-left" class="text-lg font-bold text-slate-700">45m</div>
                 </div>
               </div>
             </div>
@@ -156,6 +156,10 @@
               <i id="btn-clock-icon" data-lucide="play" class="w-5 h-5"></i>
               <span id="btn-clock-text">Clock In Now</span>
             </button>
+            <button id="btn-break-toggle" onclick="toggleBreak()" class="hidden flex-1 py-4 px-6 rounded-xl font-bold text-white bg-amber-500 hover:bg-amber-600 transition-all shadow-md hover:shadow-lg items-center justify-center space-x-2 text-base">
+              <i data-lucide="coffee" class="w-5 h-5"></i>
+              <span id="btn-break-text">Start Break</span>
+            </button>
           </div>
         </div>
 
@@ -177,7 +181,7 @@
             <!-- Hours Allowance Counter (Remaining) -->
             <div class="p-4 rounded-xl bg-emerald-50/50 border border-emerald-100">
               <div class="text-xs font-semibold text-emerald-600 uppercase tracking-wider">Shift Remaining</div>
-              <div id="remaining-timer" class="text-3xl font-extrabold text-emerald-900 font-mono my-1">10:00:00</div>
+              <div id="remaining-timer" class="text-3xl font-extrabold text-emerald-900 font-mono my-1">08:00:00</div>
               <div class="w-full bg-emerald-200/60 rounded-full h-2 mt-3 overflow-hidden">
                 <div id="shift-progress-bar" class="bg-emerald-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
               </div>
@@ -393,12 +397,15 @@
   <!-- APPLICATION JAVASCRIPT -->
   <script>
     // GLOBAL STATE MANAGEMENT
-    const SHIFT_TARGET_SECONDS = 10 * 3600; // 10 hours in seconds
+    const SHIFT_TARGET_SECONDS = 8 * 3600; // 8 hours in seconds
     let currentShiftSeconds = 0;
     let timerInterval = null;
     let isClockedIn = false;
     let clockInTimestamp = null;
     let currentUserName = '';
+    const BREAK_ALLOWANCE_SECONDS = 45 * 60; // 45 minute break allowance
+    let isOnBreak = false;
+    let breakSecondsUsed = 0;
     const LEGACY_SELF_NAME = 'You (Current User)';
 
     function escapeHtml(str) {
@@ -422,15 +429,75 @@
     // Update status badge + clock button for the current clocked-in state
     function updateClockUI(clockedIn) {
       const badge = document.getElementById('employee-badge');
-      badge.className = clockedIn
-        ? "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 flex items-center space-x-1 pulse-ring"
-        : "px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 flex items-center space-x-1";
-      badge.innerHTML = `<span class="w-2 h-2 rounded-full ${clockedIn ? 'bg-emerald-500' : 'bg-slate-400'}"></span><span id="status-label">${clockedIn ? 'Clocked In' : 'Clocked Out'}</span>`;
+      const onBreak = clockedIn && isOnBreak;
+      badge.className = onBreak
+        ? "px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 flex items-center space-x-1"
+        : clockedIn
+          ? "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 flex items-center space-x-1 pulse-ring"
+          : "px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 flex items-center space-x-1";
+      badge.innerHTML = `<span class="w-2 h-2 rounded-full ${onBreak ? 'bg-amber-500' : clockedIn ? 'bg-emerald-500' : 'bg-slate-400'}"></span><span id="status-label">${onBreak ? 'On Break' : clockedIn ? 'Clocked In' : 'Clocked Out'}</span>`;
 
       const btn = document.getElementById('btn-clock-toggle');
       btn.className = `flex-1 py-4 px-6 rounded-xl font-bold text-white ${clockedIn ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'} transition-all shadow-md hover:shadow-lg flex items-center justify-center space-x-2 text-base`;
       btn.innerHTML = `<i id="btn-clock-icon" data-lucide="${clockedIn ? 'square' : 'play'}" class="w-5 h-5"></i><span id="btn-clock-text">${clockedIn ? 'Clock Out Now' : 'Clock In Now'}</span>`;
       lucide.createIcons();
+    }
+
+    // Show/hide + restyle the break button, and flip the status badge
+    function updateBreakUI() {
+      const btn = document.getElementById('btn-break-toggle');
+      if (!btn) return;
+      if (!isClockedIn) {
+        btn.classList.add('hidden');
+        btn.classList.remove('flex');
+        return;
+      }
+      btn.classList.remove('hidden');
+      btn.classList.add('flex');
+      btn.className = `flex-1 py-4 px-6 rounded-xl font-bold text-white ${isOnBreak ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-500 hover:bg-amber-600'} transition-all shadow-md hover:shadow-lg flex items-center justify-center space-x-2 text-base`;
+      btn.innerHTML = `<i data-lucide="${isOnBreak ? 'play' : 'coffee'}" class="w-5 h-5"></i><span id="btn-break-text">${isOnBreak ? 'End Break' : 'Start Break'}</span>`;
+      lucide.createIcons();
+    }
+
+    function logAction(action) {
+      const now = new Date();
+      activityLogs.unshift({
+        id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+        employeeName: currentUserName || LEGACY_SELF_NAME,
+        isMine: true,
+        action: action,
+        time: now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        address: userLocation.address || 'Captured GPS Site',
+        coords: `${userLocation.lat || '35.7796'}, ${userLocation.lng || '-78.6382'}`
+      });
+    }
+
+    function actionPillClass(action) {
+      if (action === 'Clock In') return 'bg-emerald-100 text-emerald-700';
+      if (action === 'Break Start') return 'bg-amber-100 text-amber-700';
+      if (action === 'Break End') return 'bg-sky-100 text-sky-700';
+      return 'bg-slate-100 text-slate-700';
+    }
+
+    // START / END BREAK
+    function toggleBreak() {
+      if (!isClockedIn) return;
+      if (!isOnBreak) {
+        isOnBreak = true;
+        logAction('Break Start');
+        showToast('Break started. Your work timer is paused.', 'info');
+      } else {
+        isOnBreak = false;
+        logAction('Break End');
+        showToast('Welcome back! Work timer resumed.', 'success');
+      }
+      updateClockUI(true);
+      updateBreakUI();
+      updateShiftTimerDisplay();
+      saveStateToStorage();
+      renderEmployeeHistory();
+      renderManagerDashboard();
     }
 
     function syncNameInput() {
@@ -578,6 +645,10 @@
 
       } else {
         // --- CLOCK OUT ACTION ---
+        if (isOnBreak) {
+          isOnBreak = false;
+          logAction('Break End');
+        }
         isClockedIn = false;
 
         // UI Updates for Employee
@@ -603,6 +674,8 @@
       }
 
       // Refresh icons & store
+      updateBreakUI();
+      updateShiftTimerDisplay();
       syncNameInput();
       lucide.createIcons();
       saveStateToStorage();
@@ -615,7 +688,11 @@
       if (timerInterval) clearInterval(timerInterval);
 
       timerInterval = setInterval(() => {
-        currentShiftSeconds++;
+        if (isOnBreak) {
+          breakSecondsUsed++;   // on break: work time is paused
+        } else {
+          currentShiftSeconds++;
+        }
         updateShiftTimerDisplay();
       }, 1000);
     }
@@ -653,6 +730,19 @@
 
       document.getElementById('remaining-timer').innerText = formattedRemaining;
 
+      // Break time left
+      const breakEl = document.getElementById('break-left');
+      if (breakEl) {
+        const breakRem = Math.max(0, BREAK_ALLOWANCE_SECONDS - breakSecondsUsed);
+        if (isOnBreak && breakRem === 0) {
+          breakEl.innerText = 'Over limit';
+        } else if (isOnBreak) {
+          breakEl.innerText = String(Math.floor(breakRem / 60)) + ':' + String(breakRem % 60).padStart(2, '0');
+        } else {
+          breakEl.innerText = Math.ceil(breakRem / 60) + 'm';
+        }
+      }
+
       // Progress bar percentage
       const progressPercent = Math.min(100, (currentShiftSeconds / SHIFT_TARGET_SECONDS) * 100);
       document.getElementById('shift-progress-bar').style.width = `${progressPercent}%`;
@@ -683,7 +773,7 @@
         tr.innerHTML = `
           <td class="py-4 px-6 font-medium text-slate-900">${log.date} at ${log.time}<div class="text-xs text-slate-500 font-normal">${escapeHtml(log.employeeName)}</div></td>
           <td class="py-4 px-6">
-            <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${isClockIn ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}">
+            <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${actionPillClass(log.action)}">
               ${log.action}
             </span>
           </td>
@@ -715,6 +805,7 @@
         role: "Employee",
         avatar: "",
         isClockedIn: isClockedIn,
+        isOnBreak: isOnBreak,
         clockInTime: isClockedIn ? "Just Now" : "Not Active",
         elapsedSeconds: currentShiftSeconds,
         location: {
@@ -760,8 +851,8 @@
                   <p class="text-xs text-slate-500">${emp.role}</p>
                 </div>
               </div>
-              <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${emp.isClockedIn ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
-                ${emp.isClockedIn ? 'Clocked In' : 'Clocked Out'}
+              <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${emp.isOnBreak ? 'bg-amber-100 text-amber-700' : emp.isClockedIn ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
+                ${emp.isOnBreak ? 'On Break' : emp.isClockedIn ? 'Clocked In' : 'Clocked Out'}
               </span>
             </div>
 
@@ -803,7 +894,7 @@
         tr.innerHTML = `
           <td class="py-3.5 px-6 font-semibold text-slate-900">${escapeHtml(log.employeeName)}</td>
           <td class="py-3.5 px-6">
-            <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${isClockIn ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}">
+            <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${actionPillClass(log.action)}">
               ${log.action}
             </span>
           </td>
@@ -853,7 +944,7 @@
 
     // MANAGER PASSWORD GATE
     // >>> CHANGE THIS to your own manager password <<<
-    const MANAGER_PASSWORD = 'Proview1!';
+    const MANAGER_PASSWORD = 'CHANGE-ME-123';
     const MANAGER_AUTH_KEY = 'timesync_manager_unlocked';
 
     function isManagerUnlocked() {
@@ -976,6 +1067,8 @@
     function saveStateToStorage() {
       const state = {
         isClockedIn,
+        isOnBreak,
+        breakSecondsUsed,
         currentUserName,
         currentShiftSeconds,
         activityLogs
@@ -989,6 +1082,8 @@
         try {
           const parsed = JSON.parse(saved);
           isClockedIn = parsed.isClockedIn || false;
+          isOnBreak = isClockedIn && parsed.isOnBreak === true;
+          breakSecondsUsed = parsed.breakSecondsUsed || 0;
           currentShiftSeconds = parsed.currentShiftSeconds || 0;
           currentUserName = typeof parsed.currentUserName === 'string' ? parsed.currentUserName : '';
           if (parsed.activityLogs && parsed.activityLogs.length > 0) {
@@ -998,6 +1093,7 @@
           if (isClockedIn) {
             startTimer();
             updateClockUI(true);
+            updateBreakUI();
           }
           updateShiftTimerDisplay();
           syncNameInput();
